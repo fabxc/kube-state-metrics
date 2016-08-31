@@ -25,19 +25,19 @@ import (
 )
 
 type metricsRegistryMock struct {
-	readyNodes                  float64
-	unreadyNodes                float64
+	nodes                       float64
+	nodesReady                  float64
 	deploymentReplicas          map[string]float64
 	deploymentReplicasAvailable map[string]float64
 	containerRestarts           map[string]float64
 }
 
-func (mr *metricsRegistryMock) setReadyNodes(count float64) {
-	mr.readyNodes = count
+func (mr *metricsRegistryMock) setNodes(count float64) {
+	mr.nodes = count
 }
 
-func (mr *metricsRegistryMock) setUnreadyNodes(count float64) {
-	mr.unreadyNodes = count
+func (mr *metricsRegistryMock) setNodesReady(count float64) {
+	mr.nodesReady = count
 }
 
 func (mr *metricsRegistryMock) setDeploymentReplicas(name, namespace string, count float64) {
@@ -123,8 +123,8 @@ func TestRegisterNodeMetrics(t *testing.T) {
 				getNode(api.ConditionUnknown),
 			},
 			registry: &metricsRegistryMock{
-				readyNodes:   3,
-				unreadyNodes: 2,
+				nodesReady: 3,
+				nodes:      5,
 			},
 		},
 	}

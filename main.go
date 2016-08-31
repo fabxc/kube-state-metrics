@@ -52,8 +52,9 @@ const (
 type metricsContainer struct {
 	deploymentReplicas          *prometheus.GaugeVec
 	deploymentReplicasAvailable *prometheus.GaugeVec
-	nodes                       *prometheus.GaugeVec
 	containerRestarts           *prometheus.GaugeVec
+	nodes                       prometheus.Gauge
+	nodesReady                  prometheus.Gauge
 }
 
 var (
@@ -192,15 +193,15 @@ func initializeMetrics() {
 		},
 	)
 
-	metrics.nodes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	metrics.nodes = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "nodes",
 		Help: "Number of nodes",
-	},
-		[]string{
-			// Whether they are reporting ready status
-			"ready",
-		},
-	)
+	})
+
+	metrics.nodesReady = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "nodes_ready",
+		Help: "Number of nodes that are ready",
+	})
 
 	metrics.containerRestarts = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "container_restarts",
@@ -219,6 +220,7 @@ func initializeMetrics() {
 	prometheus.MustRegister(metrics.deploymentReplicas)
 	prometheus.MustRegister(metrics.deploymentReplicasAvailable)
 	prometheus.MustRegister(metrics.nodes)
+	prometheus.MustRegister(metrics.nodesReady)
 	prometheus.MustRegister(metrics.containerRestarts)
 }
 
@@ -268,8 +270,8 @@ func metricsServer() {
 // All this machinery is for mocking out the prometheus interface for testing
 // because promtheus won't let us fetch a metric value after we set it.
 type metricsRegistry interface {
-	setReadyNodes(float64)
-	setUnreadyNodes(float64)
+	setNodes(float64)
+	setNodesReady(float64)
 	setDeploymentReplicas(string, string, float64)
 	setDeploymentReplicasAvailable(string, string, float64)
 	setContainerRestarts(string, string, string, float64)
@@ -277,12 +279,12 @@ type metricsRegistry interface {
 
 type metricsRegistryImpl struct{}
 
-func (mr *metricsRegistryImpl) setReadyNodes(count float64) {
-	metrics.nodes.With(prometheus.Labels{"ready": "true"}).Set(count)
+func (mr *metricsRegistryImpl) setNodes(count float64) {
+	metrics.nodes.Set(count)
 }
 
-func (mr *metricsRegistryImpl) setUnreadyNodes(count float64) {
-	metrics.nodes.With(prometheus.Labels{"ready": "false"}).Set(count)
+func (mr *metricsRegistryImpl) setNodesReady(count float64) {
+	metrics.nodesReady.Set(count)
 }
 
 func (mr *metricsRegistryImpl) setDeploymentReplicas(name, namespace string, count float64) {
@@ -346,22 +348,18 @@ func (mc *metricsController) updateMetrics(r metricsRegistry) error {
 }
 
 func registerNodeMetrics(r metricsRegistry, nodes []api.Node) {
+	var allNodes float64
 	var readyNodes float64
-	var unreadyNodes float64
 	for _, n := range nodes {
 		for _, c := range n.Status.Conditions {
-			if c.Type == api.NodeReady {
-				if c.Status == api.ConditionTrue {
-					readyNodes += 1
-				} else {
-					// Even if status is unknown, call it unready.
-					unreadyNodes += 1
-				}
+			if c.Type == api.NodeReady && c.Status == api.ConditionTrue {
+				readyNodes++
 			}
 		}
+		allNodes++
 	}
-	r.setReadyNodes(readyNodes)
-	r.setUnreadyNodes(unreadyNodes)
+	r.setNodes(allNodes)
+	r.setNodesReady(readyNodes)
 }
 
 func registerDeploymentMetrics(r metricsRegistry, dpls []extensions.Deployment) {
@@ -379,7 +377,7 @@ func registerPodMetrics(r metricsRegistry, pods []*api.Pod) {
 	}
 }
 
-// newLoadBalancerController creates a new controller from the given config.
+// newMetricsController creates a new controller from the given config.
 func newMetricsController(kubeClient clientset.Interface) *metricsController {
 	mc := &metricsController{
 		client: kubeClient,
